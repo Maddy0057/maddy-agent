@@ -3,21 +3,18 @@ from flask import Flask, request, jsonify, render_template_string
 import os
 import markdown
 from dotenv import load_dotenv
-load_dotenv()  # Add this near the top of your script
+
+load_dotenv()  # Load environment variables
 
 app = Flask(__name__)
 
-
+# Load API key
 api_key = os.getenv("GOOGLE_API_KEY")
 if not api_key:
-    raise ValueError("API key not found. Set GOOGLE_API_KEY in your environment.")  # Replace with your actual API key
+    raise ValueError("API key not found. Set GOOGLE_API_KEY in your environment.")
 model_name = 'gemini-2.0-flash'
+model = genai.GenerativeModel(model_name)  # Simplified, no configure() needed
 
-genai.configure(api_key=api_key) # This line is no longer neccesary.
-model = genai.GenerativeModel(model_name)
-
-
-# Backstory and role for Maddy
 # Backstory for Maddy
 backstory = """
 Maddy is a friendly and intuitive AI agent designed to help people with low awareness of phishing attacks. 
@@ -29,25 +26,32 @@ Maddy provides results in three simple outputs:
 """
 
 # Load frontend HTML
-with open('index.html', 'r') as file:
-    html_template = file.read()
+try:
+    with open('index.html', 'r') as file:
+        html_template = file.read()
+except FileNotFoundError:
+    html_template = "<h1>Error: index.html not found</h1>"
 
-# Route for serving the frontend
+# Health check route
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({'status': 'ok'})
+
+# Root route
 @app.route('/')
 def home():
     return render_template_string(html_template)
 
-# Route for prediction
+# Prediction route
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
         data = request.get_json()
-        email_text = data.get('email', '')
+        email_text = data.get('email', '').strip()
 
         if not email_text:
             return jsonify({'error': 'No email provided'}), 400
 
-        # Prompt for the AI model (removed "bold" to let Markdown handle it naturally)
         prompt = f"""
         {backstory}
 
@@ -68,16 +72,19 @@ def predict():
         # Convert Markdown to HTML
         result_html = markdown.markdown(result_text)
 
-        # Parse prediction (for color logic)
+        # Parse prediction
         prediction = 'Phishing' if 'phishing attempt' in result_text.lower() else 'Safe'
 
         return jsonify({
             'prediction': prediction,
-            'result': result_html  # Send HTML instead of raw Markdown
+            'result': result_html
         })
+    except genai.GenerationError as e:
+        return jsonify({'error': f"API generation error: {str(e)}"}), 500
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f"Unexpected error: {str(e)}"}), 500
 
-# Run the app
+# Vercel compatibility
 if __name__ == '__main__':
     app.run(debug=True, host='127.0.0.1')
+application = app  # Export for Vercel
